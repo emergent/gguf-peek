@@ -26,6 +26,24 @@ pub fn f16_to_f32(bits: u16) -> f32 {
     }
 }
 
+/// Splits `data` into blocks, refusing a trailing partial block.
+fn whole_blocks<'a>(
+    data: &'a [u8],
+    block_bytes: usize,
+    ty: &str,
+) -> io::Result<std::slice::ChunksExact<'a, u8>> {
+    if data.len() % block_bytes != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{ty} data must be a multiple of {block_bytes} bytes, got {}",
+                data.len()
+            ),
+        ));
+    }
+    Ok(data.chunks_exact(block_bytes))
+}
+
 /// Elements per Q4_0 block.
 pub const QK4_0: usize = 32;
 /// Bytes per Q4_0 block: f16 scale (2) + 32 nibbles (16).
@@ -36,17 +54,7 @@ pub const Q4_0_BLOCK_BYTES: usize = 2 + QK4_0 / 2;
 /// The nibbles are NOT stored as adjacent pairs. Byte j holds element j in its
 /// low nibble and element j + 16 in its high nibble.
 pub fn dequantize_q4_0(data: &[u8]) -> io::Result<Vec<f32>> {
-    if data.len() % Q4_0_BLOCK_BYTES != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "Q4_0 data must be a multiple of {Q4_0_BLOCK_BYTES} bytes, got {}",
-                data.len()
-            ),
-        ));
-    }
-
-    let blocks = data.chunks_exact(Q4_0_BLOCK_BYTES);
+    let blocks = whole_blocks(data, Q4_0_BLOCK_BYTES, "Q4_0")?;
     let mut out = Vec::with_capacity(blocks.len() * QK4_0);
     for block in blocks {
         let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
@@ -81,6 +89,34 @@ pub fn scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
         let m = (scales[j + 4] >> 4) | ((scales[j] >> 6) << 4);
         (sc, m)
     }
+}
+
+/// Bytes per Q4_K super-block: d (2) + dmin (2) + scales (12) + 256 nibbles (128).
+pub const Q4_K_BLOCK_BYTES: usize = 2 + 2 + 12 + QK_K / 2;
+
+/// Q4_K: y = d * scale * q - dmin * min, per 32-element sub-block.
+pub fn dequantize_q4_k(data: &[u8]) -> io::Result<Vec<f32>> {
+    let blocks = whole_blocks(data, Q4_K_BLOCK_BYTES, "Q4_K")?;
+    let mut out = Vec::with_capacity(blocks.len() * QK_K);
+    for block in blocks {
+        let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+        let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
+        let scales: &[u8; 12] = block[4..16].try_into().unwrap();
+        let qs = &block[16..];
+
+        // 32 bytes of qs feed 64 values: low nibbles to sub-block 2i,
+        // high nibbles to sub-block 2i + 1.
+        for (i, q) in qs.chunks_exact(32).enumerate() {
+            let (sc, m) = scale_min_k4(2 * i, scales);
+            let (d1, m1) = (d * sc as f32, dmin * m as f32);
+            let (sc, m) = scale_min_k4(2 * i + 1, scales);
+            let (d2, m2) = (d * sc as f32, dmin * m as f32);
+
+            out.extend(q.iter().map(|&b| d1 * (b & 0x0F) as f32 - m1));
+            out.extend(q.iter().map(|&b| d2 * (b >> 4) as f32 - m2));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -190,6 +226,63 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// One Q4_K super-block.
+    fn q4_k_block(d: [u8; 2], dmin: [u8; 2], scales: [u8; 12], qs: [u8; 128]) -> Vec<u8> {
+        [d.as_slice(), &dmin, &scales, &qs].concat()
+    }
+
+    const F16_ZERO: [u8; 2] = [0, 0];
+
+    #[test]
+    fn q4_k_low_nibbles_then_high_nibbles_per_32_bytes() {
+        let scales = pack_scales_mins([1; 8], [0; 8]);
+        let mut qs = [0u8; 128];
+        qs[0] = 0x21; // low -> y[0], high -> y[32]
+        qs[32] = 0x43; // low -> y[64], high -> y[96]
+        let y = dequantize_q4_k(&q4_k_block(F16_ONE, F16_ZERO, scales, qs)).unwrap();
+
+        assert_eq!((y[0], y[32], y[64], y[96]), (1.0, 2.0, 3.0, 4.0));
+        assert_eq!(y.iter().filter(|&&v| v != 0.0).count(), 4);
+    }
+
+    #[test]
+    fn q4_k_applies_scale_and_min_per_sub_block() {
+        let mut sc = [1; 8];
+        let mut m = [0; 8];
+        (sc[5], m[5]) = (2, 5); // sub-block 5 = y[160..192] = high nibbles of qs[64..96]
+        let mut qs = [0u8; 128];
+        qs[64] = 0x70;
+        let y =
+            dequantize_q4_k(&q4_k_block(F16_ONE, F16_ONE, pack_scales_mins(sc, m), qs)).unwrap();
+
+        assert_eq!(y[160], 2.0 * 7.0 - 5.0);
+        assert_eq!(y[161], -5.0); // q = 0 still pays the min
+        assert_eq!(y[128], 0.0); // sub-block 4, low nibble 0
+    }
+
+    #[test]
+    fn q4_k_multiple_blocks_are_concatenated() {
+        let scales = pack_scales_mins([1; 8], [0; 8]);
+        let two = 0x4000u16.to_le_bytes();
+        let data = [
+            q4_k_block(F16_ONE, F16_ZERO, scales, [0x11; 128]),
+            q4_k_block(two, F16_ZERO, scales, [0x11; 128]),
+        ]
+        .concat();
+        let y = dequantize_q4_k(&data).unwrap();
+
+        assert_eq!(y.len(), 512);
+        assert_eq!(&y[..256], &[1.0; 256]);
+        assert_eq!(&y[256..], &[2.0; 256]);
+    }
+
+    #[test]
+    fn q4_k_rejects_partial_block() {
+        let mut data = q4_k_block(F16_ONE, F16_ZERO, [0; 12], [0; 128]);
+        data.pop();
+        assert!(dequantize_q4_k(&data).is_err());
     }
 
     #[test]
