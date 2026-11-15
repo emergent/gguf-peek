@@ -1,0 +1,89 @@
+== Llama-3.2-1B-Instruct-Q4_K_M.head.gguf
+GGUF version      : 3
+architecture      : llama
+tensors           : 147
+metadata entries  : 36
+alignment         : 32
+tensor data offset: 7831456 (0x777fa0)
+block_count       : 16
+
+== metadata
+  general.architecture                         llama
+  general.basename                             Llama-3.2-1B-Instruct
+  general.file_type                            U32(15)
+  general.finetune                             Instruct
+  general.name                                 Llama-3.2-1B-Instruct
+  general.quantization_version                 U32(2)
+  general.quantized_by                         Unsloth
+  general.repo_url                             https://huggingface.co/unsloth
+  general.size_label                           1B
+  general.type                                 model
+  llama.attention.head_count                   U32(32)
+  llama.attention.head_count_kv                U32(8)
+  llama.attention.key_length                   U32(64)
+  llama.attention.layer_norm_rms_epsilon       F32(1e-5)
+  llama.attention.value_length                 U32(64)
+  llama.block_count                            U32(16)
+  llama.context_length                         U32(131072)
+  llama.embedding_length                       U32(2048)
+  llama.feed_forward_length                    U32(8192)
+  llama.rope.dimension_count                   U32(64)
+  llama.rope.freq_base                         F32(500000.0)
+  llama.vocab_size                             U32(128256)
+  quantize.imatrix.chunks_count                I32(689)
+  quantize.imatrix.dataset                     unsloth_calibration_Llama-3.2-1B-Instruct.txt
+  quantize.imatrix.entries_count               I32(112)
+  quantize.imatrix.file                        Llama-3.2-1B-Instruct-GGUF/imatrix_unsloth.dat
+  tokenizer.chat_template                      {{- bos_token }}
+{%- if custom_tools is defined %}
+    {%- s... (3827 bytes)
+  tokenizer.ggml.add_bos_token                 Bool(true)
+  tokenizer.ggml.bos_token_id                  U32(128000)
+  tokenizer.ggml.eos_token_id                  U32(128009)
+  tokenizer.ggml.merges                        [280147 items]
+  tokenizer.ggml.model                         gpt2
+  tokenizer.ggml.padding_token_id              U32(128004)
+  tokenizer.ggml.pre                           llama-bpe
+  tokenizer.ggml.token_type                    [128256 items]
+  tokenizer.ggml.tokens                        [128256 items]
+
+== tensor types
+  type         count           elements    share
+  F32             34              67616    0.01%
+  Q4_K            96          830472192   67.20%
+  Q6_K            17          405274624   32.79%
+
+== per-layer tensors (blk.N.*)
+  attn_k.weight                Q4_Kx16
+  attn_norm.weight             F32x16
+  attn_output.weight           Q4_Kx16
+  attn_q.weight                Q4_Kx16
+  attn_v.weight                Q4_Kx8, Q6_Kx8   <- mixed
+  ffn_down.weight              Q4_Kx8, Q6_Kx8   <- mixed
+  ffn_gate.weight              Q4_Kx16
+  ffn_norm.weight              F32x16
+  ffn_up.weight                Q4_Kx16
+
+== standalone tensors
+  output_norm.weight           F32      [2048]
+  rope_freqs.weight            F32      [32]
+  token_embd.weight            Q6_K     [2048, 128256]
+
+== use_more_bits(i, 16) vs actual
+  attn_v.weight                base=Q4_K promoted=Q6_K -> 16/16 layers match
+    by block index
+      actual   : ##..#..#..#..###
+      predicted: ##..#..#..#..###
+    by file order (n=16) -> 16/16 match
+      actual   : ##..#..#..#..###
+      predicted: ##..#..#..#..###
+      blk order: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+  ffn_down.weight              base=Q4_K promoted=Q6_K -> 16/16 layers match
+    by block index
+      actual   : ##..#..#..#..###
+      predicted: ##..#..#..#..###
+    by file order (n=16) -> 16/16 match
+      actual   : ##..#..#..#..###
+      predicted: ##..#..#..#..###
+      blk order: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+
