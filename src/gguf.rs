@@ -211,7 +211,7 @@ impl<R: Read> Reader<R> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("unknown metadata value type {other}"),
-                ))
+                ));
             }
         })
     }
