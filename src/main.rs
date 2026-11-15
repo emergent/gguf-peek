@@ -1,4 +1,5 @@
 mod gguf;
+mod quant;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
