@@ -1,0 +1,122 @@
+== gemma-4-26B-A4B-it-Q4_K_M.gguf
+GGUF version      : 3
+architecture      : gemma4
+tensors           : 658
+metadata entries  : 46
+alignment         : 32
+tensor data offset: 15816896 (0xf158c0)
+block_count       : 30
+
+== metadata
+  gemma4.attention.head_count                  U32(16)
+  gemma4.attention.head_count_kv               [30 items]
+  gemma4.attention.key_length                  U32(512)
+  gemma4.attention.key_length_swa              U32(256)
+  gemma4.attention.layer_norm_rms_epsilon      F32(1e-6)
+  gemma4.attention.shared_kv_layers            U32(0)
+  gemma4.attention.sliding_window              U32(1024)
+  gemma4.attention.sliding_window_pattern      [30 items]
+  gemma4.attention.value_length                U32(512)
+  gemma4.attention.value_length_swa            U32(256)
+  gemma4.block_count                           U32(30)
+  gemma4.context_length                        U32(262144)
+  gemma4.embedding_length                      U32(2816)
+  gemma4.embedding_length_per_layer_input      U32(0)
+  gemma4.expert_count                          U32(128)
+  gemma4.expert_feed_forward_length            U32(704)
+  gemma4.expert_used_count                     U32(8)
+  gemma4.feed_forward_length                   U32(2112)
+  gemma4.final_logit_softcapping               F32(30.0)
+  gemma4.rope.dimension_count                  U32(512)
+  gemma4.rope.dimension_count_swa              U32(256)
+  gemma4.rope.freq_base                        F32(1000000.0)
+  gemma4.rope.freq_base_swa                    F32(10000.0)
+  general.architecture                         gemma4
+  general.file_type                            U32(15)
+  general.finetune                             it
+  general.name                                 Gemma 4 26B A4B
+  general.quantization_version                 U32(2)
+  general.sampling.temp                        F32(1.0)
+  general.sampling.top_k                       I32(64)
+  general.sampling.top_p                       F32(0.95)
+  general.size_label                           26B-A4B
+  general.type                                 model
+  tokenizer.chat_template                      {%- macro format_parameters(properties, required) -%}
+    {%... (12045 bytes)
+  tokenizer.ggml.add_bos_token                 Bool(false)
+  tokenizer.ggml.add_space_prefix              Bool(false)
+  tokenizer.ggml.bos_token_id                  U32(2)
+  tokenizer.ggml.eos_token_id                  U32(1)
+  tokenizer.ggml.mask_token_id                 U32(4)
+  tokenizer.ggml.merges                        [514906 items]
+  tokenizer.ggml.model                         gemma4
+  tokenizer.ggml.padding_token_id              U32(0)
+  tokenizer.ggml.scores                        [262144 items]
+  tokenizer.ggml.token_type                    [262144 items]
+  tokenizer.ggml.tokens                        [262144 items]
+  tokenizer.ggml.unknown_token_id              U32(3)
+
+== tensor types
+  type         count           elements    share
+  F32            392           11514142    0.05%
+  Q5_0            32         4155244544   16.47%
+  Q8_0            28         3635838976   14.41%
+  Q4_K           192        16617373696   65.86%
+  Q6_K            14          813170688    3.22%
+
+== per-layer tensors (blk.N.*)
+  attn_k.weight                Q4_Kx30
+  attn_k_norm.weight           F32x30
+  attn_norm.weight             F32x30
+  attn_output.weight           Q4_Kx30
+  attn_q.weight                Q4_Kx30
+  attn_q_norm.weight           F32x30
+  attn_v.weight                Q4_Kx12, Q6_Kx13   <- mixed
+  ffn_down.weight              Q5_0x16, Q8_0x14   <- mixed
+  ffn_down_exps.scale          F32x30
+  ffn_down_exps.weight         Q5_0x16, Q8_0x14   <- mixed
+  ffn_gate.weight              Q4_Kx30
+  ffn_gate_inp.scale           F32x30
+  ffn_gate_inp.weight          F32x30
+  ffn_gate_up_exps.weight      Q4_Kx30
+  ffn_norm.weight              F32x30
+  ffn_up.weight                Q4_Kx30
+  layer_output_scale.weight    F32x30
+  post_attention_norm.weight   F32x30
+  post_ffw_norm.weight         F32x30
+  post_ffw_norm_1.weight       F32x30
+  post_ffw_norm_2.weight       F32x30
+  pre_ffw_norm_2.weight        F32x30
+
+== standalone tensors
+  output_norm.weight           F32      [2816]
+  rope_freqs.weight            F32      [256]
+  token_embd.weight            Q6_K     [2816, 262144]
+
+== use_more_bits(i, 30) vs actual
+  attn_v.weight                base=Q4_K promoted=Q6_K -> 17/25 layers match
+    mismatched layers: 6, 8, 9, 13, 14, 16, 24, 25
+    by block index
+      actual   : ###.. #..#. .#..# ..#.. ##### 
+      predicted: ###..#..#..#..#..#..#..#..####
+    by file order (n=25) -> 25/25 match
+      actual   : ###..#..#..#..#..#..#####
+      predicted: ###..#..#..#..#..#..#####
+      blk order: 0 1 2 3 4 6 7 8 9 10 12 13 14 15 16 18 19 20 21 22 24 25 26 27 28
+  ffn_down.weight              base=Q5_0 promoted=Q8_0 -> 30/30 layers match
+    by block index
+      actual   : ###..#..#..#..#..#..#..#..####
+      predicted: ###..#..#..#..#..#..#..#..####
+    by file order (n=30) -> 30/30 match
+      actual   : ###..#..#..#..#..#..#..#..####
+      predicted: ###..#..#..#..#..#..#..#..####
+      blk order: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29
+  ffn_down_exps.weight         base=Q5_0 promoted=Q8_0 -> 30/30 layers match
+    by block index
+      actual   : ###..#..#..#..#..#..#..#..####
+      predicted: ###..#..#..#..#..#..#..#..####
+    by file order (n=30) -> 30/30 match
+      actual   : ###..#..#..#..#..#..#..#..####
+      predicted: ###..#..#..#..#..#..#..#..####
+      blk order: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29
+
