@@ -179,6 +179,41 @@ fn print_more_bits_check(g: &Gguf) {
         println!("    by block index");
         println!("      actual   : {actual}");
         println!("      predicted: {predicted}");
+
+        // llama.cpp feeds use_more_bits a running counter (qs.i_ffn_down etc.), and only
+        // resolves it to the real block number when n_expert > 1. For dense models the
+        // counter follows the order tensors appear in the file.
+        let seq: Vec<GgmlType> = g
+            .tensors
+            .iter()
+            .filter(|t| t.layer().map(|(_, k)| k == *kind).unwrap_or(false))
+            .map(|t| t.ty)
+            .collect();
+        let total = seq.len();
+        let actual_seq: String = seq
+            .iter()
+            .map(|&ty| if ty == promoted { '#' } else { '.' })
+            .collect();
+        let pred_seq: String = (0..total)
+            .map(|i| if use_more_bits(i, total) { '#' } else { '.' })
+            .collect();
+        let hits = actual_seq
+            .chars()
+            .zip(pred_seq.chars())
+            .filter(|(a, b)| a == b)
+            .count();
+        println!("    by file order (n={total}) -> {hits}/{total} match");
+        println!("      actual   : {actual_seq}");
+        println!("      predicted: {pred_seq}");
+
+        let order: Vec<String> = g
+            .tensors
+            .iter()
+            .filter_map(|t| t.layer())
+            .filter(|(_, k)| *k == *kind)
+            .map(|(i, _)| i.to_string())
+            .collect();
+        println!("      blk order: {}", order.join(" "));
     }
     println!();
 }
