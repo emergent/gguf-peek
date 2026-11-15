@@ -18,7 +18,11 @@ pub fn f16_to_f32(bits: u16) -> f32 {
         }
         // infinity (mant == 0) and NaN (mant != 0)
         0x1F => f32::from_bits(sign | (0xFF << 23) | (mant << 13)),
-        _ => f32::from_bits(sign | ((exp + 127 - 15) << 23) | (mant << 13)),
+        // normal numbers: rebias the exponent, left-align the mantissa
+        _ => {
+            let exp = exp + 127 - 15;
+            f32::from_bits(sign | (exp << 23) | (mant << 13))
+        }
     }
 }
 
@@ -42,8 +46,9 @@ pub fn dequantize_q4_0(data: &[u8]) -> io::Result<Vec<f32>> {
         ));
     }
 
-    let mut out = Vec::with_capacity(data.len() / Q4_0_BLOCK_BYTES * QK4_0);
-    for block in data.chunks_exact(Q4_0_BLOCK_BYTES) {
+    let blocks = data.chunks_exact(Q4_0_BLOCK_BYTES);
+    let mut out = Vec::with_capacity(blocks.len() * QK4_0);
+    for block in blocks {
         let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
         let qs = &block[2..];
 
@@ -184,7 +189,8 @@ mod candle_crosscheck {
         let mut elements = 0usize;
         for t in g.tensors.iter().filter(|t| t.ty == Q4_0) {
             let n = t.elements() as usize;
-            let raw = gguf::read_tensor_bytes(&path, &g, t, n / QK4_0 * Q4_0_BLOCK_BYTES).unwrap();
+            let len = n / QK4_0 * Q4_0_BLOCK_BYTES;
+            let raw = gguf::read_tensor_bytes(&path, &g, t, len).unwrap();
             let ours = dequantize_q4_0(&raw).unwrap();
 
             let theirs: Vec<f32> = content
