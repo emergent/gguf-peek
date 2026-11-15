@@ -158,3 +158,58 @@ mod tests {
         }
     }
 }
+
+/// Cross-check against candle on a real file. Needs a GGUF with Q4_0 tensors:
+///
+///     GGUF_Q4_0=/path/to/model-Q4_0.gguf cargo test --release -- --ignored --nocapture
+#[cfg(test)]
+mod candle_crosscheck {
+    use super::*;
+    use crate::gguf::{self, GgmlType};
+    use candle_core::Device;
+    use candle_core::quantized::gguf_file;
+
+    const Q4_0: GgmlType = GgmlType(2);
+
+    #[test]
+    #[ignore = "needs a Q4_0 GGUF file in $GGUF_Q4_0"]
+    fn q4_0_matches_candle_for_every_q4_0_tensor() {
+        let path = std::env::var("GGUF_Q4_0").expect("set GGUF_Q4_0");
+        let g = gguf::read(&path).unwrap();
+
+        let mut file = std::fs::File::open(&path).unwrap();
+        let content = gguf_file::Content::read(&mut file).unwrap();
+
+        let mut checked = 0usize;
+        let mut elements = 0usize;
+        for t in g.tensors.iter().filter(|t| t.ty == Q4_0) {
+            let n = t.elements() as usize;
+            let raw = gguf::read_tensor_bytes(&path, &g, t, n / QK4_0 * Q4_0_BLOCK_BYTES).unwrap();
+            let ours = dequantize_q4_0(&raw).unwrap();
+
+            let theirs: Vec<f32> = content
+                .tensor(&mut file, &t.name, &Device::Cpu)
+                .unwrap()
+                .dequantize(&Device::Cpu)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1()
+                .unwrap();
+
+            assert_eq!(ours.len(), theirs.len(), "{}", t.name);
+            let mismatches = ours
+                .iter()
+                .zip(&theirs)
+                .filter(|(a, b)| a.to_bits() != b.to_bits())
+                .count();
+            assert_eq!(mismatches, 0, "{}: {mismatches}/{n} values differ", t.name);
+
+            checked += 1;
+            elements += n;
+        }
+
+        assert!(checked > 0, "no Q4_0 tensors in {path}");
+        println!("{checked} Q4_0 tensors, {elements} values: bit-identical to candle");
+    }
+}

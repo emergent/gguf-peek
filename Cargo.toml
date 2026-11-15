@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 
 [dev-dependencies]
+candle-core = "0.11.1"
 half = "2.7.1"
