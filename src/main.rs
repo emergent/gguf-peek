@@ -1,9 +1,15 @@
 mod gguf;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
 
 use gguf::{GgmlType, Gguf, TensorInfo};
+
+/// llama.cpp `llama_tensor_get_type_impl()` in src/llama-quant.cpp.
+/// Short-circuiting keeps `i - n/8` from underflowing.
+fn use_more_bits(i: usize, n: usize) -> bool {
+    i < n / 8 || i >= 7 * n / 8 || (i - n / 8) % 3 == 2
+}
 
 fn main() -> ExitCode {
     let Some(path) = std::env::args().nth(1) else {
@@ -23,6 +29,7 @@ fn main() -> ExitCode {
     print_metadata(&g);
     print_type_totals(&g);
     print_kind_matrix(&g);
+    print_more_bits_check(&g);
 
     ExitCode::SUCCESS
 }
@@ -107,6 +114,71 @@ fn print_kind_matrix(g: &Gguf) {
     println!("== standalone tensors");
     for t in singles {
         println!("  {:<28} {:<8} {:?}", t.name, t.ty.name(), t.dims);
+    }
+    println!();
+}
+
+/// The payoff: predict promoted layers from the formula, then check against the file.
+fn print_more_bits_check(g: &Gguf) {
+    let Some(n) = g.block_count().map(|n| n as usize) else {
+        println!("== use_more_bits check: skipped (block_count unknown)");
+        return;
+    };
+
+    let mut by_kind: BTreeMap<&str, BTreeMap<usize, GgmlType>> = BTreeMap::new();
+    for t in &g.tensors {
+        if let Some((layer, kind)) = t.layer() {
+            by_kind.entry(kind).or_default().insert(layer, t.ty);
+        }
+    }
+
+    println!("== use_more_bits(i, {n}) vs actual");
+    for (kind, layers) in &by_kind {
+        let distinct: BTreeSet<GgmlType> = layers.values().copied().collect();
+        if distinct.len() < 2 {
+            continue;
+        }
+
+        let base = *distinct.iter().next().unwrap();
+        let promoted = *distinct.iter().next_back().unwrap();
+
+        let mut agree = 0usize;
+        let mut disagree: Vec<usize> = Vec::new();
+        for (&i, &ty) in layers {
+            let predicted = if use_more_bits(i, n) { promoted } else { base };
+            if predicted == ty {
+                agree += 1;
+            } else {
+                disagree.push(i);
+            }
+        }
+
+        println!(
+            "  {:<28} base={} promoted={} -> {}/{} layers match",
+            kind,
+            base.name(),
+            promoted.name(),
+            agree,
+            layers.len()
+        );
+        if !disagree.is_empty() {
+            let shown: Vec<String> = disagree.iter().take(16).map(|i| i.to_string()).collect();
+            println!("    mismatched layers: {}", shown.join(", "));
+        }
+
+        let actual: String = (0..n)
+            .map(|i| match layers.get(&i) {
+                Some(&ty) if ty == promoted => '#',
+                Some(_) => '.',
+                None => ' ',
+            })
+            .collect();
+        let predicted: String = (0..n)
+            .map(|i| if use_more_bits(i, n) { '#' } else { '.' })
+            .collect();
+        println!("    by block index");
+        println!("      actual   : {actual}");
+        println!("      predicted: {predicted}");
     }
     println!();
 }
