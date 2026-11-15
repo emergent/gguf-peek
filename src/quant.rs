@@ -327,9 +327,12 @@ mod tests {
     }
 }
 
-/// Cross-check against candle on a real file. Needs a GGUF with Q4_0 tensors:
+/// Cross-check against candle on real files. Each test needs a GGUF that
+/// contains tensors of that type:
 ///
-///     GGUF_Q4_0=/path/to/model-Q4_0.gguf cargo test --release -- --ignored --nocapture
+///     GGUF_Q4_0=/path/to/model-Q4_0.gguf \
+///     GGUF_Q4_K=/path/to/model-Q4_K_M.gguf \
+///         cargo test --release -- --ignored --nocapture
 #[cfg(test)]
 mod candle_crosscheck {
     use super::*;
@@ -337,12 +340,17 @@ mod candle_crosscheck {
     use candle_core::Device;
     use candle_core::quantized::gguf_file;
 
-    const Q4_0: GgmlType = GgmlType(2);
+    type Dequantize = fn(&[u8]) -> io::Result<Vec<f32>>;
 
-    #[test]
-    #[ignore = "needs a Q4_0 GGUF file in $GGUF_Q4_0"]
-    fn q4_0_matches_candle_for_every_q4_0_tensor() {
-        let path = std::env::var("GGUF_Q4_0").expect("set GGUF_Q4_0");
+    /// Dequantizes every tensor of type `ty` in $`env` both ways and
+    /// requires bit-identical output.
+    fn check_every_tensor(
+        env: &str,
+        ty: GgmlType,
+        block: (usize, usize), // (elements, bytes)
+        dequantize: Dequantize,
+    ) {
+        let path = std::env::var(env).unwrap_or_else(|_| panic!("set {env}"));
         let g = gguf::read(&path).unwrap();
 
         let mut file = std::fs::File::open(&path).unwrap();
@@ -350,11 +358,11 @@ mod candle_crosscheck {
 
         let mut checked = 0usize;
         let mut elements = 0usize;
-        for t in g.tensors.iter().filter(|t| t.ty == Q4_0) {
+        for t in g.tensors.iter().filter(|t| t.ty == ty) {
             let n = t.elements() as usize;
-            let len = n / QK4_0 * Q4_0_BLOCK_BYTES;
+            let len = n / block.0 * block.1;
             let raw = gguf::read_tensor_bytes(&path, &g, t, len).unwrap();
-            let ours = dequantize_q4_0(&raw).unwrap();
+            let ours = dequantize(&raw).unwrap();
 
             let theirs: Vec<f32> = content
                 .tensor(&mut file, &t.name, &Device::Cpu)
@@ -378,7 +386,22 @@ mod candle_crosscheck {
             elements += n;
         }
 
-        assert!(checked > 0, "no Q4_0 tensors in {path}");
-        println!("{checked} Q4_0 tensors, {elements} values: bit-identical to candle");
+        let name = ty.name();
+        assert!(checked > 0, "no {name} tensors in {path}");
+        println!("{checked} {name} tensors, {elements} values: bit-identical to candle");
+    }
+
+    #[test]
+    #[ignore = "needs a GGUF file with Q4_0 tensors in $GGUF_Q4_0"]
+    fn q4_0_matches_candle_for_every_q4_0_tensor() {
+        let block = (QK4_0, Q4_0_BLOCK_BYTES);
+        check_every_tensor("GGUF_Q4_0", GgmlType(2), block, dequantize_q4_0);
+    }
+
+    #[test]
+    #[ignore = "needs a GGUF file with Q4_K tensors in $GGUF_Q4_K"]
+    fn q4_k_matches_candle_for_every_q4_k_tensor() {
+        let block = (QK_K, Q4_K_BLOCK_BYTES);
+        check_every_tensor("GGUF_Q4_K", GgmlType(12), block, dequantize_q4_k);
     }
 }
