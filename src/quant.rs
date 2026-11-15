@@ -62,6 +62,27 @@ pub fn dequantize_q4_0(data: &[u8]) -> io::Result<Vec<f32>> {
     Ok(out)
 }
 
+/// Elements per k-quants super-block.
+pub const QK_K: usize = 256;
+
+/// Q4_K packs 8 six-bit scales and 8 six-bit mins into 12 bytes.
+/// Returns (scale, min) of sub-block `j` (0..8).
+///
+/// ```text
+/// byte 0..4 : [s4..s7 high 2 bits | s0..s3 (6 bits)]
+/// byte 4..8 : [m4..m7 high 2 bits | m0..m3 (6 bits)]
+/// byte 8..12: [m4..m7 low 4 bits  | s4..s7 low 4 bits]
+/// ```
+pub fn scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
+    if j < 4 {
+        (scales[j] & 0x3F, scales[j + 4] & 0x3F)
+    } else {
+        let sc = (scales[j + 4] & 0x0F) | ((scales[j - 4] >> 6) << 4);
+        let m = (scales[j + 4] >> 4) | ((scales[j] >> 6) << 4);
+        (sc, m)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +141,55 @@ mod tests {
         let mut data = q4_0_block(F16_ONE, [0x88; 16]);
         data.pop();
         assert!(dequantize_q4_0(&data).is_err());
+    }
+
+    #[test]
+    fn q4_k_first_four_scales_and_mins_are_low_6_bits() {
+        let mut scales = [0u8; 12];
+        scales[1] = 0b11_101010; // top 2 bits belong to sub-block 5
+        scales[5] = 0b01_010101;
+        assert_eq!(scale_min_k4(1, &scales), (0b101010, 0b010101));
+    }
+
+    #[test]
+    fn q4_k_last_four_scales_and_mins_are_split_across_bytes() {
+        let mut scales = [0u8; 12];
+        scales[1] = 0b10_000000; // high 2 bits of scale 5
+        scales[5] = 0b01_000000; // high 2 bits of min 5
+        scales[9] = 0b0011_1100; // low 4 bits: min 5 (high nibble), scale 5 (low nibble)
+        assert_eq!(scale_min_k4(5, &scales), (0b10_1100, 0b01_0011));
+    }
+
+    /// The packing side, as written in ggml's quantize_row_q4_K.
+    fn pack_scales_mins(sc: [u8; 8], m: [u8; 8]) -> [u8; 12] {
+        let mut q = [0u8; 12];
+        for j in 0..8 {
+            if j < 4 {
+                q[j] = sc[j];
+                q[j + 4] = m[j];
+            } else {
+                q[j + 4] = (sc[j] & 0xF) | ((m[j] & 0xF) << 4);
+                q[j - 4] |= (sc[j] >> 4) << 6;
+                q[j] |= (m[j] >> 4) << 6;
+            }
+        }
+        q
+    }
+
+    #[test]
+    fn q4_k_scale_min_round_trips_through_ggml_packing() {
+        for seed in 0..64u8 {
+            let sc: [u8; 8] = std::array::from_fn(|j| (seed + 7 * j as u8) % 64);
+            let m: [u8; 8] = std::array::from_fn(|j| (63 - seed + 13 * j as u8) % 64);
+            let packed = pack_scales_mins(sc, m);
+            for j in 0..8 {
+                assert_eq!(
+                    scale_min_k4(j, &packed),
+                    (sc[j], m[j]),
+                    "seed {seed}, j {j}"
+                );
+            }
+        }
     }
 
     #[test]
