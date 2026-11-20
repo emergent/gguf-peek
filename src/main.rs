@@ -1,10 +1,7 @@
-mod gguf;
-mod quant;
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
 
-use gguf::{GgmlType, Gguf, TensorInfo};
+use gguf_peek::gguf::{self, GgmlType, Gguf, TensorInfo};
 
 /// llama.cpp `llama_tensor_get_type_impl()` in src/llama-quant.cpp.
 /// Short-circuiting keeps `i - n/8` from underflowing.
